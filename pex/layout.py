@@ -7,8 +7,8 @@ import os
 import zipfile
 from abc import abstractmethod
 from contextlib import contextmanager
-
-from pex.common import atomic_directory, is_python_script, open_zip, safe_copy, safe_mkdir
+from pex.compatibility import WINDOWS
+from pex.common import atomic_directory, is_python_script, open_zip, safe_copy, safe_mkdir, safe_symlink
 from pex.enum import Enum
 from pex.tracer import TRACER
 from pex.typing import TYPE_CHECKING
@@ -106,17 +106,16 @@ def _install(
                         raise AssertionError(
                             "Expected code_hash to be populated for {}.".format(layout)
                         )
-
                     with atomic_directory(
                         bootstrap_cache, source=layout.bootstrap_strip_prefix(), exclusive=True
                     ) as bootstrap_zip_chroot:
                         if not bootstrap_zip_chroot.is_finalized:
                             layout.extract_bootstrap(bootstrap_zip_chroot.work_dir)
-                    os.symlink(
-                        os.path.join(os.path.relpath(bootstrap_cache, install_to)),
+                    safe_symlink(
+                        os.path.join(bootstrap_cache),
                         os.path.join(chroot.work_dir, BOOTSTRAP_DIR),
+                        src_start=install_to
                     )
-
                     for location, sha in pex_info.distributions.items():
                         spread_dest = os.path.join(pex_info.install_cache, sha, location)
                         dist_relpath = os.path.join(DEPS_DIR, location)
@@ -129,12 +128,10 @@ def _install(
                                 layout.extract_dist(spread_chroot.work_dir, dist_relpath)
                         symlink_dest = os.path.join(chroot.work_dir, dist_relpath)
                         safe_mkdir(os.path.dirname(symlink_dest))
-                        os.symlink(
-                            os.path.relpath(
-                                spread_dest,
-                                os.path.join(install_to, os.path.dirname(dist_relpath)),
-                            ),
+                        safe_symlink(
+                            spread_dest,
                             symlink_dest,
+                            src_start=os.path.join(install_to, os.path.dirname(dist_relpath)),
                         )
 
                     code_dest = os.path.join(pex_info.zip_unsafe_cache, code_hash)
@@ -142,9 +139,10 @@ def _install(
                         if not code_chroot.is_finalized:
                             layout.extract_code(code_chroot.work_dir)
                     for path in os.listdir(code_dest):
-                        os.symlink(
-                            os.path.join(os.path.relpath(code_dest, install_to), path),
-                            os.path.join(chroot.work_dir, path),
+                        safe_symlink(
+                            os.path.join(code_dest, path),
+                            os.path.join(chroot.work_dir, path),    
+                            src_start=install_to,
                         )
 
                     layout.extract_pex_info(chroot.work_dir)
@@ -184,7 +182,7 @@ class _ZipAppPEX(_Layout):
         dist_relpath,  # type: str
     ):
         for name in self._names:
-            if name.startswith(dist_relpath) and not name.endswith("/"):
+            if name.startswith(os.path.normcase(dist_relpath)) and not name.endswith("/"):
                 self._zfp.extract(name, dest_dir)
 
     def extract_code(self, dest_dir):

@@ -127,12 +127,15 @@ def safe_copy(source, dest, overwrite=False):
     def do_copy():
         # type: () -> None
         temp_dest = dest + uuid4().hex
-        shutil.copy(source, temp_dest)
+        if os.path.isdir(source):
+            shutil.copytree(source, temp_dest)
+        else:
+            shutil.copy(source, temp_dest)
         os.rename(temp_dest, dest)
 
     # If the platform supports hard-linking, use that and fall back to copying.
     # Windows does not support hard-linking.
-    if hasattr(os, "link"):
+    if hasattr(os, "link") and not WINDOWS:
         try:
             os.link(source, dest)
         except OSError as e:
@@ -160,6 +163,19 @@ def safe_copy(source, dest, overwrite=False):
             do_copy()
     else:
         do_copy()
+
+# WINDOWS ANTI-SYMLINK COMPATIBILITY LAYER
+# Somewhat clumsy solution to redirect symlink requests to copytree for usage in Windows non-elevated environments
+def safe_symlink(source, dest, overwrite=False, src_start=None, dest_start=None):
+    if WINDOWS:
+        # For Windows copy, ensure we are using abosolute paths
+        safe_copy(source,dest,overwrite)
+    else:
+        if src_start:
+            source = os.path.relpath(source, src_start)
+        if dest_start:
+            dest = os.path.relpath(source, dest_start)
+        os.symlink(source,dest)
 
 
 # See http://stackoverflow.com/questions/2572172/referencing-other-modules-in-atexit
